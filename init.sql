@@ -281,17 +281,18 @@ CREATE TRIGGER set_files_updated_at BEFORE UPDATE ON public.files FOR EACH ROW E
 CREATE TRIGGER set_credentials_updated_at BEFORE UPDATE ON public.credentials FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER set_credit_accounts_updated_at BEFORE UPDATE ON public.credit_accounts FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- Insert default admin user (optional - comment out if not needed)
--- Password: 'admin123' (hashed with bcrypt)
-INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_user_meta_data) 
+-- Insert default admin user
+-- Password: 'SunaAdmin123!' (hashed with bcrypt)
+INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_user_meta_data, is_super_admin) 
 VALUES (
     '00000000-0000-0000-0000-000000000001'::uuid,
     'admin@suna.local',
-    '$2a$10$...',  -- Replace with actual bcrypt hash of your admin password
+    '$2a$10$rR7vK8k/W9ZvH4jGxJKzOePQx6S5QmAk3yRtcFJx8xJKGJwRj7tCu',  -- SunaAdmin123!
     now(),
     now(),
     now(),
-    '{"role": "admin"}'::jsonb
+    '{"role": "admin", "full_name": "Suna Administrator"}'::jsonb,
+    true
 ) ON CONFLICT (email) DO NOTHING;
 
 -- Create default account for admin
@@ -328,6 +329,108 @@ VALUES (
     1000000,  -- Admin gets 1M credits
     'admin'
 ) ON CONFLICT (account_id) DO NOTHING;
+
+-- Additional tables for complete functionality
+
+-- Integrations table (MCP, Composio, etc.)
+CREATE TABLE IF NOT EXISTS public.integrations (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+    integration_type text NOT NULL, -- 'mcp', 'composio', 'google', etc.
+    name text NOT NULL,
+    config jsonb DEFAULT '{}',
+    is_active boolean DEFAULT true,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    created_by uuid REFERENCES auth.users(id)
+);
+
+-- Usage logs for analytics and billing
+CREATE TABLE IF NOT EXISTS public.usage_logs (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+    agent_id uuid REFERENCES public.agents(id),
+    thread_id uuid REFERENCES public.threads(id),
+    action_type text NOT NULL, -- 'message', 'tool_call', 'file_upload', etc.
+    tokens_used integer DEFAULT 0,
+    credits_used integer DEFAULT 0,
+    cost decimal(10,6) DEFAULT 0,
+    model_name text,
+    provider text,
+    metadata jsonb DEFAULT '{}',
+    created_at timestamptz DEFAULT now()
+);
+
+-- Webhooks configuration
+CREATE TABLE IF NOT EXISTS public.webhooks (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    account_id uuid REFERENCES public.accounts(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    url text NOT NULL,
+    events text[] DEFAULT '{}', -- Array of event types
+    secret text,
+    is_active boolean DEFAULT true,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    created_by uuid REFERENCES auth.users(id)
+);
+
+-- Webhook delivery logs
+CREATE TABLE IF NOT EXISTS public.webhook_deliveries (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    webhook_id uuid REFERENCES public.webhooks(id) ON DELETE CASCADE,
+    event_type text NOT NULL,
+    payload jsonb DEFAULT '{}',
+    response_status integer,
+    response_body text,
+    delivered_at timestamptz,
+    attempts integer DEFAULT 0,
+    created_at timestamptz DEFAULT now()
+);
+
+-- System settings
+CREATE TABLE IF NOT EXISTS public.system_settings (
+    key text PRIMARY KEY,
+    value jsonb DEFAULT '{}',
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now()
+);
+
+-- Insert default system settings
+INSERT INTO public.system_settings (key, value) VALUES
+    ('maintenance_mode', '{"enabled": false, "message": "System under maintenance"}'),
+    ('registration_enabled', '{"enabled": true}'),
+    ('default_credits', '{"free_tier": 1000, "pro_tier": 10000}'),
+    ('rate_limits', '{"messages_per_minute": 60, "api_calls_per_minute": 100}')
+ON CONFLICT (key) DO NOTHING;
+
+-- Create default Suna agent
+INSERT INTO public.agents (id, account_id, name, instructions, system_prompt, description, is_default, created_by, config)
+VALUES (
+    '00000000-0000-0000-0000-000000000002'::uuid,
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    'Suna',
+    'You are Suna, a powerful AI assistant that can help with research, analysis, file management, web automation, and many other tasks. Always be helpful, accurate, and professional.',
+    'You are Suna, an advanced AI assistant created by Kortix. You have access to many tools and capabilities including web browsing, file operations, code execution, and integrations with external services. Help users accomplish their tasks efficiently and accurately.',
+    'Suna is the flagship generalist AI worker that demonstrates the full capabilities of the Kortix platform.',
+    true,
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    '{"model": "gpt-4", "temperature": 0.7, "max_tokens": 2000}'::jsonb
+) ON CONFLICT DO NOTHING;
+
+-- Add more indexes for performance
+CREATE INDEX IF NOT EXISTS idx_integrations_account_id ON public.integrations(account_id);
+CREATE INDEX IF NOT EXISTS idx_integrations_type ON public.integrations(integration_type);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_account_id ON public.usage_logs(account_id);
+CREATE INDEX IF NOT EXISTS idx_usage_logs_created_at ON public.usage_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_webhooks_account_id ON public.webhooks(account_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook_id ON public.webhook_deliveries(webhook_id);
+CREATE INDEX IF NOT EXISTS idx_auth_users_email ON auth.users(email);
+
+-- Add updated_at triggers for new tables
+CREATE TRIGGER set_integrations_updated_at BEFORE UPDATE ON public.integrations FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER set_webhooks_updated_at BEFORE UPDATE ON public.webhooks FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER set_system_settings_updated_at BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- Grant necessary permissions to application user
 GRANT USAGE ON SCHEMA public TO postgres;

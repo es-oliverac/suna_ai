@@ -10,18 +10,32 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-suna_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-suna_password_change_me}
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+      # Performance optimizations
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
+      POSTGRES_WORK_MEM: 4MB
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      # Custom PostgreSQL configuration for better performance
+      - ./postgres.conf:/etc/postgresql/postgresql.conf:ro
     ports:
       - "5432:5432"
     networks:
       - suna-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-suna_user} -d ${POSTGRES_DB:-suna}"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -32,7 +46,18 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --bind 0.0.0.0 --protected-mode no --maxmemory 2gb --maxmemory-policy allkeys-lru
+    command: |
+      redis-server 
+      --appendonly yes 
+      --bind 0.0.0.0 
+      --protected-mode no 
+      --maxmemory 1gb 
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-keepalive 300
+      --timeout 0
     ports:
       - "6379:6379"
     volumes:
@@ -41,9 +66,16 @@ services:
       - suna-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -56,9 +88,18 @@ services:
     build:
       context: ./suna/backend
       dockerfile: Dockerfile
+      target: production
     restart: unless-stopped
     ports:
       - "8000:8000"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
     environment:
       # Environment Mode
       - ENV_MODE=production
@@ -135,11 +176,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
     logging:
       driver: "json-file"
       options:
@@ -152,8 +193,17 @@ services:
     build:
       context: ./suna/backend
       dockerfile: Dockerfile
+      target: production
     restart: unless-stopped
-    command: uv run dramatiq --skip-logging --processes 2 --threads 2 run_agent_background
+    command: uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
     environment:
       # Same environment variables as backend
       - ENV_MODE=production
@@ -218,9 +268,18 @@ services:
     build:
       context: ./suna/frontend
       dockerfile: Dockerfile
+      target: production
     restart: unless-stopped
     ports:
       - "3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
     environment:
       - NEXT_PUBLIC_ENV_MODE=production
       - NEXT_PUBLIC_SUPABASE_URL=postgresql://${POSTGRES_USER:-suna_user}:${POSTGRES_PASSWORD:-suna_password_change_me}@postgres:5432/${POSTGRES_DB:-suna}
