@@ -83,10 +83,6 @@ services:
   # Backend API (Python/FastAPI)
   backend:
     image: ghcr.io/kortix-ai/suna-backend:latest
-    build:
-      context: ./suna/backend
-      dockerfile: Dockerfile
-      target: production
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -235,10 +231,6 @@ services:
   # Background Worker
   worker:
     image: ghcr.io/kortix-ai/suna-backend:latest
-    build:
-      context: ./suna/backend
-      dockerfile: Dockerfile
-      target: production
     restart: unless-stopped
     command: uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
     deploy:
@@ -341,10 +333,7 @@ services:
 
   # Frontend (Next.js)
   frontend:
-    build:
-      context: ./suna/frontend
-      dockerfile: Dockerfile
-      target: production
+    image: ghcr.io/kortix-ai/suna-frontend:latest
     restart: unless-stopped
     ports:
       - "3000:3000"
