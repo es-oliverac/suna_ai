@@ -89,6 +89,7 @@ services:
       apt-get update &&
       apt-get install -y curl git build-essential &&
       pip install uv &&
+      rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
       cp -r /tmp/repo/suna/backend/* /app/ &&
       uv sync &&
@@ -248,6 +249,7 @@ services:
       apt-get update &&
       apt-get install -y curl git build-essential &&
       pip install uv &&
+      rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
       cp -r /tmp/repo/suna/backend/* /app/ &&
       uv sync &&
@@ -360,6 +362,7 @@ services:
       sh -c "
       apt-get update &&
       apt-get install -y git &&
+      rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
       cp -r /tmp/repo/suna/frontend/* /app/ &&
       npm ci &&
