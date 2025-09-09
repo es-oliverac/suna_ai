@@ -82,10 +82,18 @@ services:
 
   # Backend API (Python/FastAPI)
   backend:
-    build:
-      context: ./suna/backend
-      dockerfile: Dockerfile
-      target: production
+    image: python:3.11-slim
+    working_dir: /app
+    command: >
+      sh -c "
+      apt-get update &&
+      apt-get install -y curl git build-essential &&
+      pip install uv &&
+      git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
+      cp -r /tmp/repo/suna/backend/* /app/ &&
+      uv sync &&
+      uv run python api.py
+      "
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -233,12 +241,19 @@ services:
 
   # Background Worker
   worker:
-    build:
-      context: ./suna/backend
-      dockerfile: Dockerfile
-      target: production
+    image: python:3.11-slim
+    working_dir: /app
+    command: >
+      sh -c "
+      apt-get update &&
+      apt-get install -y curl git build-essential &&
+      pip install uv &&
+      git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
+      cp -r /tmp/repo/suna/backend/* /app/ &&
+      uv sync &&
+      uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
+      "
     restart: unless-stopped
-    command: uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
     deploy:
       resources:
         limits:
@@ -339,10 +354,18 @@ services:
 
   # Frontend (Next.js)
   frontend:
-    build:
-      context: ./suna/frontend
-      dockerfile: Dockerfile
-      target: production
+    image: node:20-slim
+    working_dir: /app
+    command: >
+      sh -c "
+      apt-get update &&
+      apt-get install -y git &&
+      git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
+      cp -r /tmp/repo/suna/frontend/* /app/ &&
+      npm ci &&
+      npm run build &&
+      npm start
+      "
     restart: unless-stopped
     ports:
       - "3000:3000"
