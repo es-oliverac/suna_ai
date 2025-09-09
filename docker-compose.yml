@@ -91,7 +91,7 @@ services:
       pip install uv &&
       rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
-      cp -r /tmp/repo/suna/backend/* /app/ &&
+      cp -r /tmp/repo/backend_root/* /app/ &&
       uv sync &&
       uv run python api.py
       "
@@ -251,7 +251,7 @@ services:
       pip install uv &&
       rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
-      cp -r /tmp/repo/suna/backend/* /app/ &&
+      cp -r /tmp/repo/backend_root/* /app/ &&
       uv sync &&
       uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
       "
@@ -364,7 +364,7 @@ services:
       apt-get install -y git &&
       rm -rf /tmp/repo &&
       git clone --depth 1 https://github.com/es-oliverac/suna_ai.git /tmp/repo &&
-      cp -r /tmp/repo/suna/frontend/* /app/ &&
+      cp -r /tmp/repo/frontend_root/* /app/ &&
       npm ci &&
       npm run build &&
       npm start
