@@ -1,0 +1,267 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (replacement for Supabase)
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-suna}
+      POSTGRES_USER: ${POSTGRES_USER:-suna_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-suna_password_change_me}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - suna-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-suna_user} -d ${POSTGRES_DB:-suna}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --bind 0.0.0.0 --protected-mode no --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - suna-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backend API (Python/FastAPI)
+  backend:
+    image: ghcr.io/kortix-ai/suna-backend:latest
+    build:
+      context: ./suna/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Environment Mode
+      - ENV_MODE=production
+      
+      # Database Configuration (PostgreSQL instead of Supabase)
+      - SUPABASE_URL=postgresql://${POSTGRES_USER:-suna_user}:${POSTGRES_PASSWORD:-suna_password_change_me}@postgres:5432/${POSTGRES_DB:-suna}
+      - SUPABASE_ANON_KEY=${JWT_SECRET:-your_jwt_secret_key_here}
+      - SUPABASE_SERVICE_ROLE_KEY=${JWT_SECRET:-your_jwt_secret_key_here}
+      - SUPABASE_JWT_SECRET=${JWT_SECRET:-your_jwt_secret_key_here}
+      
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_SSL=false
+      
+      # LLM Providers (at least one required)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      
+      # Search & Scraping APIs
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+      - FIRECRAWL_URL=${FIRECRAWL_URL:-https://api.firecrawl.dev}
+      - RAPID_API_KEY=${RAPID_API_KEY:-}
+      
+      # Daytona Sandbox (required for agent execution)
+      - DAYTONA_API_KEY=${DAYTONA_API_KEY:-}
+      - DAYTONA_SERVER_URL=${DAYTONA_SERVER_URL:-https://app.daytona.io/api}
+      - DAYTONA_TARGET=${DAYTONA_TARGET:-us}
+      
+      # Security & Webhooks
+      - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY:-}
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}
+      - TRIGGER_WEBHOOK_SECRET=${TRIGGER_WEBHOOK_SECRET:-}
+      
+      # Admin Configuration
+      - KORTIX_ADMIN_API_KEY=${KORTIX_ADMIN_API_KEY:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      
+      # Integrations (Optional)
+      - COMPOSIO_API_KEY=${COMPOSIO_API_KEY:-}
+      - COMPOSIO_WEBHOOK_SECRET=${COMPOSIO_WEBHOOK_SECRET:-}
+      - COMPOSIO_API_BASE=${COMPOSIO_API_BASE:-https://backend.composio.dev}
+      
+      # Google Integrations (Optional)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${WEBHOOK_BASE_URL:-https://your-domain.com}/api/google/callback
+      - FRONTEND_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}
+      
+      # Observability (Optional)
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      
+      # Billing (Optional)
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_DEFAULT_PLAN_ID=${STRIPE_DEFAULT_PLAN_ID:-}
+      - STRIPE_DEFAULT_TRIAL_DAYS=${STRIPE_DEFAULT_TRIAL_DAYS:-14}
+      
+    volumes:
+      - backend_logs:/app/logs
+    networks:
+      - suna-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Background Worker
+  worker:
+    image: ghcr.io/kortix-ai/suna-backend:latest
+    build:
+      context: ./suna/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: uv run dramatiq --skip-logging --processes 2 --threads 2 run_agent_background
+    environment:
+      # Same environment variables as backend
+      - ENV_MODE=production
+      - SUPABASE_URL=postgresql://${POSTGRES_USER:-suna_user}:${POSTGRES_PASSWORD:-suna_password_change_me}@postgres:5432/${POSTGRES_DB:-suna}
+      - SUPABASE_ANON_KEY=${JWT_SECRET:-your_jwt_secret_key_here}
+      - SUPABASE_SERVICE_ROLE_KEY=${JWT_SECRET:-your_jwt_secret_key_here}
+      - SUPABASE_JWT_SECRET=${JWT_SECRET:-your_jwt_secret_key_here}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_SSL=false
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+      - FIRECRAWL_URL=${FIRECRAWL_URL:-https://api.firecrawl.dev}
+      - RAPID_API_KEY=${RAPID_API_KEY:-}
+      - DAYTONA_API_KEY=${DAYTONA_API_KEY:-}
+      - DAYTONA_SERVER_URL=${DAYTONA_SERVER_URL:-https://app.daytona.io/api}
+      - DAYTONA_TARGET=${DAYTONA_TARGET:-us}
+      - MCP_CREDENTIAL_ENCRYPTION_KEY=${MCP_CREDENTIAL_ENCRYPTION_KEY:-}
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}
+      - TRIGGER_WEBHOOK_SECRET=${TRIGGER_WEBHOOK_SECRET:-}
+      - KORTIX_ADMIN_API_KEY=${KORTIX_ADMIN_API_KEY:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - COMPOSIO_API_KEY=${COMPOSIO_API_KEY:-}
+      - COMPOSIO_WEBHOOK_SECRET=${COMPOSIO_WEBHOOK_SECRET:-}
+      - COMPOSIO_API_BASE=${COMPOSIO_API_BASE:-https://backend.composio.dev}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${WEBHOOK_BASE_URL:-https://your-domain.com}/api/google/callback
+      - FRONTEND_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_DEFAULT_PLAN_ID=${STRIPE_DEFAULT_PLAN_ID:-}
+      - STRIPE_DEFAULT_TRIAL_DAYS=${STRIPE_DEFAULT_TRIAL_DAYS:-14}
+      
+    volumes:
+      - worker_logs:/app/logs
+    networks:
+      - suna-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./suna/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_ENV_MODE=production
+      - NEXT_PUBLIC_SUPABASE_URL=postgresql://${POSTGRES_USER:-suna_user}:${POSTGRES_PASSWORD:-suna_password_change_me}@postgres:5432/${POSTGRES_DB:-suna}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${JWT_SECRET:-your_jwt_secret_key_here}
+      - NEXT_PUBLIC_BACKEND_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}/api
+      - NEXT_PUBLIC_URL=${WEBHOOK_BASE_URL:-https://your-domain.com}
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - NEXT_PUBLIC_POSTHOG_KEY=${POSTHOG_KEY:-}
+      - KORTIX_ADMIN_API_KEY=${KORTIX_ADMIN_API_KEY:-}
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    networks:
+      - suna-network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+  worker_logs:
+    driver: local
+
+networks:
+  suna-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
