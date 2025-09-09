@@ -83,7 +83,7 @@ services:
   # Backend API (Python/FastAPI)
   backend:
     build:
-      context: ./backend_root
+      context: ./suna/backend
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
@@ -234,7 +234,7 @@ services:
   # Background Worker
   worker:
     build:
-      context: ./backend_root
+      context: ./suna/backend
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
@@ -340,7 +340,7 @@ services:
   # Frontend (Next.js)
   frontend:
     build:
-      context: ./frontend_root
+      context: ./suna/frontend
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
